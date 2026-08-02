@@ -1,0 +1,734 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from functools import lru_cache
+import concurrent.futures
+import ipaddress
+import logging
+import socket
+import ssl
+import re
+from typing import Any
+from urllib.parse import urlparse
+
+try:
+    from bs4 import BeautifulSoup
+except Exception:  # pragma: no cover
+    BeautifulSoup = None
+import pandas as pd
+import requests
+
+try:
+    import whois
+except Exception:  # pragma: no cover
+    whois = None
+
+
+PHISHING = -1
+UNKNOWN = 0
+LEGITIMATE = 1
+
+DEFAULT_HTTP_TIMEOUT = 4
+DEFAULT_SOCKET_TIMEOUT = 3
+USER_AGENT = "PhishGuard/2.0 (+Streamlit URL scanner)"
+
+CANONICAL_FEATURES = [
+    "having_ip_address",
+    "url_length",
+    "shortining_service",
+    "having_at_symbol",
+    "double_slash_redirecting",
+    "prefix_suffix",
+    "having_sub_domain",
+    "sslfinal_state",
+    "domain_registeration_length",
+    "favicon",
+    "port",
+    "https_token",
+    "request_url",
+    "url_of_anchor",
+    "links_in_tags",
+    "sfh",
+    "submitting_to_email",
+    "abnormal_url",
+    "redirect",
+    "on_mouseover",
+    "rightclick",
+    "popupwidnow",
+    "iframe",
+    "age_of_domain",
+    "dnsrecord",
+    "web_traffic",
+    "page_rank",
+    "google_index",
+    "links_pointing_to_page",
+    "statistical_report",
+]
+
+FEATURE_METADATA = {
+    "having_ip_address": {"label": "IP address in URL", "description": "Phishing URLs often use raw IP addresses instead of trusted domain names."},
+    "url_length": {"label": "URL length", "description": "Long URLs are more likely to hide misleading paths or brand names."},
+    "shortining_service": {"label": "Shortened URL", "description": "Shorteners can hide the real destination domain."},
+    "having_at_symbol": {"label": "@ symbol", "description": "The @ character can obscure the destination in a URL."},
+    "double_slash_redirecting": {"label": "Extra // redirect pattern", "description": "Unexpected double slashes inside the path can be used for misleading redirects."},
+    "prefix_suffix": {"label": "Hyphenated domain", "description": "Brand impersonation often appears in domains that add prefixes or suffixes."},
+    "having_sub_domain": {"label": "Subdomain depth", "description": "Many nested subdomains can be used to mimic a real brand."},
+    "sslfinal_state": {"label": "HTTPS / SSL state", "description": "Valid HTTPS is a positive trust signal, though not a guarantee of safety."},
+    "domain_registeration_length": {"label": "Registration length", "description": "Very short registration periods are more common in disposable phishing domains."},
+    "favicon": {"label": "Favicon source", "description": "Loading the icon from another domain can be suspicious."},
+    "port": {"label": "Network port", "description": "Unusual ports may indicate an untrusted or unusual setup."},
+    "https_token": {"label": "'https' token in hostname", "description": "Placing 'https' inside the domain name can be a social-engineering trick."},
+    "request_url": {"label": "Embedded resource requests", "description": "Pages that pull many resources from other domains can be riskier."},
+    "url_of_anchor": {"label": "Anchor behavior", "description": "Unsafe or empty links can signal deceptive page behavior."},
+    "links_in_tags": {"label": "External tag links", "description": "A high share of off-domain script or link tags may be suspicious."},
+    "sfh": {"label": "Form handler", "description": "Blank or unsafe form actions are common on credential-harvesting pages."},
+    "submitting_to_email": {"label": "Email submission", "description": "Pages that submit forms directly to email are suspicious."},
+    "abnormal_url": {"label": "Abnormal URL pattern", "description": "Credentials in the URL or domain inconsistencies can be signs of abuse."},
+    "redirect": {"label": "Redirect behavior", "description": "Too many redirects or redirects to another host can increase risk."},
+    "on_mouseover": {"label": "Mouseover scripts", "description": "Some phishing pages use mouseover tricks to hide real actions."},
+    "rightclick": {"label": "Right-click blocking", "description": "Disabling right click can be used to frustrate inspection."},
+    "popupwidnow": {"label": "Popup behavior", "description": "Popup windows are sometimes used in fake login or alert flows."},
+    "iframe": {"label": "Iframe usage", "description": "Hidden or tiny iframes can be abused for deceptive content."},
+    "age_of_domain": {"label": "Domain age", "description": "Newly created domains are riskier than well-established domains."},
+    "dnsrecord": {"label": "DNS record", "description": "A resolvable domain is a basic legitimacy signal."},
+    "web_traffic": {"label": "Traffic reputation", "description": "External reputation signals were intentionally minimized for reliability and privacy."},
+    "page_rank": {"label": "Page rank", "description": "Page-rank style checks were intentionally minimized to avoid fragile third-party calls."},
+    "google_index": {"label": "Search indexing", "description": "Search-index checks were intentionally minimized to avoid scraping external services."},
+    "links_pointing_to_page": {"label": "Inbound link estimate", "description": "Backlink-style signals were intentionally minimized to avoid external dependencies."},
+    "statistical_report": {"label": "Suspicious pattern report", "description": "Known suspicious lexical patterns can increase risk."},
+}
+
+SHORTENER_DOMAINS = {
+    "bit.ly",
+    "tinyurl.com",
+    "t.co",
+    "goo.gl",
+    "ow.ly",
+    "is.gd",
+    "tiny.cc",
+    "buff.ly",
+    "rebrand.ly",
+    "cutt.ly",
+}
+
+MULTIPART_SUFFIXES = {
+    "co.uk",
+    "org.uk",
+    "gov.uk",
+    "ac.uk",
+    "co.in",
+    "com.au",
+    "co.jp",
+}
+
+LOGGER = logging.getLogger(__name__)
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": USER_AGENT})
+
+
+@dataclass
+class WebObservation:
+    response: requests.Response | None
+    final_url: str
+    final_hostname: str
+    history_count: int
+    text: str
+    soup: Any
+    error: str | None = None
+
+
+@dataclass
+class FeatureExtractionResult:
+    input_url: str
+    normalized_url: str
+    hostname: str
+    features: dict[str, int]
+    display_metrics: dict[str, Any]
+    feature_details: dict[str, str]
+    suspicious_indicators: list[str]
+    warnings: list[str]
+
+
+def normalize_url(raw_url: str, auto_https: bool = True) -> str:
+    if not raw_url or not raw_url.strip():
+        raise ValueError("Please enter a URL.")
+
+    url = raw_url.strip()
+    if auto_https and not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url):
+        url = f"https://{url}"
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Only http:// and https:// URLs are supported.")
+    if not parsed.hostname:
+        raise ValueError("The URL is missing a hostname.")
+
+    hostname = parsed.hostname.strip(".")
+    if not hostname:
+        raise ValueError("The URL hostname is invalid.")
+    if "." not in hostname and not _is_ip_address(hostname) and hostname.lower() != "localhost":
+        raise ValueError("The URL hostname does not look valid.")
+
+    return url
+
+
+def value_to_label(value: int) -> str:
+    return {
+        PHISHING: "Suspicious",
+        UNKNOWN: "Unknown",
+        LEGITIMATE: "Legitimate",
+    }.get(value, "Unknown")
+
+
+def get_feature_catalog() -> list[dict[str, str]]:
+    return [
+        {
+            "feature": name,
+            "label": FEATURE_METADATA[name]["label"],
+            "description": FEATURE_METADATA[name]["description"],
+        }
+        for name in CANONICAL_FEATURES
+    ]
+
+
+def build_feature_table(extraction: FeatureExtractionResult) -> pd.DataFrame:
+    rows = []
+    for feature_name in CANONICAL_FEATURES:
+        rows.append(
+            {
+                "Feature": FEATURE_METADATA[feature_name]["label"],
+                "Signal": value_to_label(extraction.features[feature_name]),
+                "Value": extraction.features[feature_name],
+                "Observed": extraction.feature_details.get(feature_name, "Not available"),
+                "Description": FEATURE_METADATA[feature_name]["description"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def extract_features(url: str) -> FeatureExtractionResult:
+    normalized_url = normalize_url(url)
+    parsed = urlparse(normalized_url)
+    hostname = parsed.hostname or ""
+    registered_domain = _registered_domain(hostname)
+    observation = _fetch_observation(normalized_url)
+    domain_info = _safe_whois(hostname)
+    dns_resolution = _resolve_hostname(hostname)
+    ssl_state = _check_ssl_state(hostname) if parsed.scheme == "https" else {"valid": False, "error": "not_https"}
+
+    features: dict[str, int] = {}
+    details: dict[str, str] = {}
+    warnings: list[str] = []
+    suspicious_indicators: list[str] = []
+
+    url_length = len(normalized_url)
+    subdomain_depth = _subdomain_depth(hostname)
+    domain_age_months = _domain_age_in_months(domain_info)
+    registration_days = _registration_length_days(domain_info)
+
+    features["having_ip_address"] = PHISHING if _is_ip_address(hostname) else LEGITIMATE
+    details["having_ip_address"] = "Hostname is a raw IP address." if features["having_ip_address"] == PHISHING else "Hostname uses a domain name."
+    if features["having_ip_address"] == PHISHING:
+        suspicious_indicators.append("The URL uses a raw IP address instead of a domain name.")
+
+    if url_length > 75:
+        features["url_length"] = PHISHING
+        suspicious_indicators.append(f"The URL is quite long ({url_length} characters).")
+    elif url_length >= 54:
+        features["url_length"] = UNKNOWN
+    else:
+        features["url_length"] = LEGITIMATE
+    details["url_length"] = f"{url_length} characters."
+
+    features["shortining_service"] = PHISHING if hostname.lower() in SHORTENER_DOMAINS else LEGITIMATE
+    details["shortining_service"] = f"Detected domain: {hostname.lower()}."
+    if features["shortining_service"] == PHISHING:
+        suspicious_indicators.append("The URL uses a shortening service that hides the real destination.")
+
+    features["having_at_symbol"] = PHISHING if "@" in normalized_url else LEGITIMATE
+    details["having_at_symbol"] = "Contains @ in the URL." if features["having_at_symbol"] == PHISHING else "No @ symbol detected."
+    if features["having_at_symbol"] == PHISHING:
+        suspicious_indicators.append("The URL contains an @ symbol, which can obscure the true destination.")
+
+    after_scheme = normalized_url.split("://", maxsplit=1)[-1]
+    features["double_slash_redirecting"] = PHISHING if "//" in after_scheme else LEGITIMATE
+    details["double_slash_redirecting"] = "Extra // found after the scheme." if features["double_slash_redirecting"] == PHISHING else "No unexpected double slash pattern found."
+
+    features["prefix_suffix"] = PHISHING if "-" in hostname else LEGITIMATE
+    details["prefix_suffix"] = f"Hostname: {hostname}."
+    if features["prefix_suffix"] == PHISHING:
+        suspicious_indicators.append("The hostname contains a hyphenated brand-style pattern.")
+
+    if subdomain_depth <= 1:
+        features["having_sub_domain"] = LEGITIMATE
+    elif subdomain_depth == 2:
+        features["having_sub_domain"] = UNKNOWN
+    else:
+        features["having_sub_domain"] = PHISHING
+        suspicious_indicators.append(f"The hostname has many nested subdomains ({subdomain_depth}).")
+    details["having_sub_domain"] = f"Subdomain depth: {subdomain_depth}."
+
+    if parsed.scheme != "https":
+        features["sslfinal_state"] = PHISHING
+    elif ssl_state["valid"]:
+        features["sslfinal_state"] = LEGITIMATE
+    else:
+        features["sslfinal_state"] = UNKNOWN
+        warnings.append("SSL certificate validation could not be fully confirmed.")
+    details["sslfinal_state"] = "HTTPS with a reachable certificate." if features["sslfinal_state"] == LEGITIMATE else "HTTPS not confirmed with a reachable certificate."
+
+    if registration_days is None:
+        features["domain_registeration_length"] = UNKNOWN
+        warnings.append("Registration-length lookup was unavailable.")
+        details["domain_registeration_length"] = "WHOIS registration dates unavailable."
+    elif registration_days > 365:
+        features["domain_registeration_length"] = LEGITIMATE
+        details["domain_registeration_length"] = f"Approximate registration length: {registration_days} days."
+    else:
+        features["domain_registeration_length"] = PHISHING
+        details["domain_registeration_length"] = f"Approximate registration length: {registration_days} days."
+        suspicious_indicators.append("The domain registration window appears short.")
+
+    favicon_state, favicon_detail = _favicon_state(observation, hostname)
+    features["favicon"] = favicon_state
+    details["favicon"] = favicon_detail
+
+    parsed_port = parsed.port
+    features["port"] = LEGITIMATE if parsed_port in {None, 80, 443} else PHISHING
+    details["port"] = "Default HTTP/HTTPS port." if features["port"] == LEGITIMATE else f"Uses non-standard port {parsed_port}."
+    if features["port"] == PHISHING:
+        suspicious_indicators.append("The URL uses a non-standard network port.")
+
+    features["https_token"] = PHISHING if "https" in hostname.lower() else LEGITIMATE
+    details["https_token"] = "Hostname contains the word 'https'." if features["https_token"] == PHISHING else "No misleading 'https' token in hostname."
+
+    request_url_state, request_url_detail, anchor_state, anchor_detail, links_state, links_detail, form_state, form_detail = _html_link_signals(
+        observation, hostname
+    )
+    features["request_url"] = request_url_state
+    details["request_url"] = request_url_detail
+    features["url_of_anchor"] = anchor_state
+    details["url_of_anchor"] = anchor_detail
+    features["links_in_tags"] = links_state
+    details["links_in_tags"] = links_detail
+    features["sfh"] = form_state
+    details["sfh"] = form_detail
+
+    submit_state, submit_detail = _submitting_to_email(observation)
+    features["submitting_to_email"] = submit_state
+    details["submitting_to_email"] = submit_detail
+    if submit_state == PHISHING:
+        suspicious_indicators.append("The page appears to submit form data directly to an email address.")
+
+    abnormal_state, abnormal_detail = _abnormal_url_state(parsed, hostname, registered_domain)
+    features["abnormal_url"] = abnormal_state
+    details["abnormal_url"] = abnormal_detail
+
+    redirect_state, redirect_detail = _redirect_state(observation, hostname)
+    features["redirect"] = redirect_state
+    details["redirect"] = redirect_detail
+    if redirect_state == PHISHING:
+        suspicious_indicators.append("The URL redirects in a way that changes host or chains multiple hops.")
+
+    mouseover_state, mouseover_detail = _contains_text_pattern(observation, ["onmouseover"], "Mouseover script markers detected.", "No mouseover script tricks detected.")
+    features["on_mouseover"] = mouseover_state
+    details["on_mouseover"] = mouseover_detail
+
+    rightclick_state, rightclick_detail = _contains_text_pattern(
+        observation,
+        ["event.button==2", "contextmenu", "preventdefault"],
+        "Right-click blocking markers detected.",
+        "No right-click blocking markers detected.",
+    )
+    features["rightclick"] = rightclick_state
+    details["rightclick"] = rightclick_detail
+
+    popup_state, popup_detail = _contains_text_pattern(observation, ["window.open", "popup"], "Popup script markers detected.", "No popup script markers detected.")
+    features["popupwidnow"] = popup_state
+    details["popupwidnow"] = popup_detail
+
+    iframe_state, iframe_detail = _iframe_state(observation)
+    features["iframe"] = iframe_state
+    details["iframe"] = iframe_detail
+
+    if domain_age_months is None:
+        features["age_of_domain"] = UNKNOWN
+        warnings.append("Domain age lookup was unavailable.")
+        details["age_of_domain"] = "WHOIS creation date unavailable."
+    elif domain_age_months >= 6:
+        features["age_of_domain"] = LEGITIMATE
+        details["age_of_domain"] = f"Approximate age: {domain_age_months} months."
+    else:
+        features["age_of_domain"] = PHISHING
+        details["age_of_domain"] = f"Approximate age: {domain_age_months} months."
+        suspicious_indicators.append("The domain appears to be very new.")
+
+    if dns_resolution["resolves"] is True:
+        features["dnsrecord"] = LEGITIMATE
+        details["dnsrecord"] = f"Domain resolved to {dns_resolution['address']}."
+    elif dns_resolution["resolves"] is False:
+        features["dnsrecord"] = PHISHING
+        details["dnsrecord"] = "Domain did not resolve in DNS."
+        suspicious_indicators.append("The domain did not resolve in DNS.")
+    else:
+        features["dnsrecord"] = UNKNOWN
+        details["dnsrecord"] = "DNS lookup was unavailable."
+        warnings.append("DNS lookup was unavailable.")
+
+    lexical_risk = _statistical_pattern_state(normalized_url, hostname)
+    features["statistical_report"] = lexical_risk["state"]
+    details["statistical_report"] = lexical_risk["detail"]
+    if lexical_risk["state"] == PHISHING:
+        suspicious_indicators.append(lexical_risk["detail"])
+
+    for feature_name in ["web_traffic", "page_rank", "google_index", "links_pointing_to_page"]:
+        features[feature_name] = UNKNOWN
+        details[feature_name] = "External reputation check intentionally skipped for reliability and privacy."
+
+    if observation.error:
+        warnings.append(f"Page content could not be fetched: {observation.error}")
+
+    display_metrics = {
+        "Normalized URL": normalized_url,
+        "Hostname": hostname,
+        "Registered domain": registered_domain or "Unavailable",
+        "URL length": url_length,
+        "Subdomains": subdomain_depth,
+        "HTTPS": parsed.scheme == "https",
+        "DNS record": details["dnsrecord"],
+        "Redirects": observation.history_count,
+        "Final URL": observation.final_url or normalized_url,
+        "Domain age (months)": domain_age_months if domain_age_months is not None else "Unavailable",
+        "Registration length (days)": registration_days if registration_days is not None else "Unavailable",
+        "HTML fetched": observation.response is not None,
+    }
+
+    for feature_name in CANONICAL_FEATURES:
+        features.setdefault(feature_name, UNKNOWN)
+        details.setdefault(feature_name, "No observation available.")
+
+    return FeatureExtractionResult(
+        input_url=url,
+        normalized_url=normalized_url,
+        hostname=hostname,
+        features=features,
+        display_metrics=display_metrics,
+        feature_details=details,
+        suspicious_indicators=suspicious_indicators,
+        warnings=list(dict.fromkeys(warnings)),
+    )
+
+
+def prepare_model_frame(extraction: FeatureExtractionResult, expected_features: list[str] | None = None) -> pd.DataFrame:
+    expected = expected_features or CANONICAL_FEATURES
+    row = {feature_name: extraction.features.get(feature_name, UNKNOWN) for feature_name in expected}
+    return pd.DataFrame([row], columns=expected)
+
+
+def _is_ip_address(hostname: str) -> bool:
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        return False
+
+
+def _registered_domain(hostname: str) -> str:
+    parts = hostname.lower().split(".")
+    if len(parts) <= 2:
+        return hostname.lower()
+    suffix = ".".join(parts[-2:])
+    if suffix in MULTIPART_SUFFIXES and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def _subdomain_depth(hostname: str) -> int:
+    registered = _registered_domain(hostname)
+    if hostname == registered:
+        return 0
+    return max(0, len(hostname.split(".")) - len(registered.split(".")))
+
+
+@lru_cache(maxsize=512)
+def _fetch_observation(url: str) -> WebObservation:
+    try:
+        response = SESSION.get(url, timeout=DEFAULT_HTTP_TIMEOUT, allow_redirects=True)
+        response.raise_for_status()
+        text = response.text[:200000]
+        soup = BeautifulSoup(text, "html.parser") if BeautifulSoup is not None else None
+        return WebObservation(
+            response=response,
+            final_url=response.url,
+            final_hostname=(urlparse(response.url).hostname or "").lower(),
+            history_count=len(response.history),
+            text=text,
+            soup=soup,
+        )
+    except requests.RequestException as exc:
+        return WebObservation(
+            response=None,
+            final_url=url,
+            final_hostname=(urlparse(url).hostname or "").lower(),
+            history_count=0,
+            text="",
+            soup=None,
+            error=str(exc),
+        )
+
+
+@lru_cache(maxsize=512)
+def _resolve_hostname(hostname: str) -> dict[str, Any]:
+    try:
+        socket.setdefaulttimeout(DEFAULT_SOCKET_TIMEOUT)
+        address = socket.gethostbyname(hostname)
+        return {"resolves": True, "address": address}
+    except socket.gaierror:
+        return {"resolves": False, "address": None}
+    except Exception as exc:  # pragma: no cover
+        LOGGER.warning("DNS lookup failed for %s: %s", hostname, exc)
+        return {"resolves": None, "address": None}
+
+
+@lru_cache(maxsize=256)
+def _check_ssl_state(hostname: str) -> dict[str, Any]:
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 443), timeout=DEFAULT_SOCKET_TIMEOUT) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
+                cert = wrapped.getpeercert()
+                return {"valid": bool(cert), "issuer": cert.get("issuer")}
+    except Exception as exc:  # pragma: no cover
+        LOGGER.warning("SSL validation failed for %s: %s", hostname, exc)
+        return {"valid": False, "error": str(exc)}
+
+
+@lru_cache(maxsize=256)
+def _safe_whois(hostname: str) -> Any:
+    if whois is None:
+        return None
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(whois.whois, hostname)
+    try:
+        return future.result(timeout=DEFAULT_HTTP_TIMEOUT)
+    except Exception as exc:  # pragma: no cover
+        LOGGER.warning("WHOIS lookup failed for %s: %s", hostname, exc)
+        return None
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _normalize_datetime(value: Any) -> datetime | None:
+    if isinstance(value, list):
+        value = next((item for item in value if isinstance(item, datetime)), value[0] if value else None)
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _domain_age_in_months(domain_info: Any) -> int | None:
+    if not domain_info:
+        return None
+    created = _normalize_datetime(getattr(domain_info, "creation_date", None))
+    if not created:
+        return None
+    now = datetime.now(timezone.utc)
+    return max(0, (now.year - created.year) * 12 + (now.month - created.month))
+
+
+def _registration_length_days(domain_info: Any) -> int | None:
+    if not domain_info:
+        return None
+    created = _normalize_datetime(getattr(domain_info, "creation_date", None))
+    expiry = _normalize_datetime(getattr(domain_info, "expiration_date", None))
+    if not created or not expiry:
+        return None
+    return max(0, (expiry - created).days)
+
+
+def _same_registered_domain(candidate: str, hostname: str) -> bool:
+    candidate_host = urlparse(candidate).hostname or candidate
+    if not candidate_host:
+        return False
+    return _registered_domain(candidate_host.lower()) == _registered_domain(hostname.lower())
+
+
+def _favicon_state(observation: WebObservation, hostname: str) -> tuple[int, str]:
+    if not observation.soup:
+        return UNKNOWN, "Page content unavailable."
+    icon = observation.soup.find("link", rel=lambda value: value and "icon" in " ".join(value).lower())
+    if not icon or not icon.get("href"):
+        return UNKNOWN, "No favicon link found."
+    href = icon.get("href", "")
+    if href.startswith("/") or _same_registered_domain(href, hostname):
+        return LEGITIMATE, "Favicon appears to load from the same site or a relative path."
+    return PHISHING, "Favicon appears to load from another domain."
+
+
+def _html_link_signals(observation: WebObservation, hostname: str) -> tuple[int, str, int, str, int, str, int, str]:
+    if not observation.soup:
+        unavailable = "Page content unavailable."
+        return UNKNOWN, unavailable, UNKNOWN, unavailable, UNKNOWN, unavailable, UNKNOWN, unavailable
+
+    anchors = observation.soup.find_all("a")
+    resource_tags = observation.soup.find_all(["img", "script", "link"])
+    forms = observation.soup.find_all("form")
+
+    suspicious_anchors = 0
+    for anchor in anchors:
+        href = (anchor.get("href") or "").strip().lower()
+        if not href or href.startswith("#") or href.startswith("javascript:") or href.startswith("mailto:"):
+            suspicious_anchors += 1
+
+    if anchors:
+        anchor_ratio = suspicious_anchors / len(anchors)
+        if anchor_ratio > 0.67:
+            anchor_state = PHISHING
+        elif anchor_ratio >= 0.31:
+            anchor_state = UNKNOWN
+        else:
+            anchor_state = LEGITIMATE
+        anchor_detail = f"Suspicious anchors: {suspicious_anchors}/{len(anchors)}."
+    else:
+        anchor_state = UNKNOWN
+        anchor_detail = "No anchor tags found."
+
+    external_resources = 0
+    total_resources = 0
+    external_links = 0
+    total_links = 0
+
+    for tag in resource_tags:
+        attr = tag.get("src") or tag.get("href")
+        if not attr:
+            continue
+        total_resources += 1
+        if attr.startswith("http") and not _same_registered_domain(attr, hostname):
+            external_resources += 1
+        if tag.name in {"script", "link"}:
+            total_links += 1
+            if attr.startswith("http") and not _same_registered_domain(attr, hostname):
+                external_links += 1
+
+    resource_ratio = external_resources / total_resources if total_resources else 0
+    if total_resources == 0:
+        request_state = UNKNOWN
+        request_detail = "No embedded resource tags found."
+    elif resource_ratio > 0.61:
+        request_state = PHISHING
+        request_detail = f"External resources: {external_resources}/{total_resources}."
+    elif resource_ratio >= 0.22:
+        request_state = UNKNOWN
+        request_detail = f"External resources: {external_resources}/{total_resources}."
+    else:
+        request_state = LEGITIMATE
+        request_detail = f"External resources: {external_resources}/{total_resources}."
+
+    links_ratio = external_links / total_links if total_links else 0
+    if total_links == 0:
+        links_state = UNKNOWN
+        links_detail = "No script/link tags with URLs found."
+    elif links_ratio > 0.81:
+        links_state = PHISHING
+        links_detail = f"External script/link tags: {external_links}/{total_links}."
+    elif links_ratio >= 0.17:
+        links_state = UNKNOWN
+        links_detail = f"External script/link tags: {external_links}/{total_links}."
+    else:
+        links_state = LEGITIMATE
+        links_detail = f"External script/link tags: {external_links}/{total_links}."
+
+    if not forms:
+        form_state = UNKNOWN
+        form_detail = "No forms found."
+    else:
+        blank_or_external = 0
+        for form in forms:
+            action = (form.get("action") or "").strip().lower()
+            if not action or action == "about:blank" or action.startswith("mailto:"):
+                blank_or_external += 1
+                continue
+            if action.startswith("http") and not _same_registered_domain(action, hostname):
+                blank_or_external += 1
+        ratio = blank_or_external / len(forms)
+        if ratio > 0.5:
+            form_state = PHISHING
+        elif ratio > 0:
+            form_state = UNKNOWN
+        else:
+            form_state = LEGITIMATE
+        form_detail = f"Unsafe form actions: {blank_or_external}/{len(forms)}."
+
+    return request_state, request_detail, anchor_state, anchor_detail, links_state, links_detail, form_state, form_detail
+
+
+def _submitting_to_email(observation: WebObservation) -> tuple[int, str]:
+    if not observation.soup:
+        return UNKNOWN, "Page content unavailable."
+    forms = observation.soup.find_all("form")
+    for form in forms:
+        action = (form.get("action") or "").strip().lower()
+        if action.startswith("mailto:"):
+            return PHISHING, "Found a form action that submits to an email address."
+    if forms:
+        return LEGITIMATE, "No email-based form submission detected."
+    return UNKNOWN, "No forms found."
+
+
+def _abnormal_url_state(parsed, hostname: str, registered_domain: str) -> tuple[int, str]:
+    if parsed.username or parsed.password:
+        return PHISHING, "The URL includes embedded credentials."
+    if registered_domain and not hostname.lower().endswith(registered_domain.lower()):
+        return PHISHING, "Hostname does not match the registered domain pattern."
+    if hostname.startswith("xn--"):
+        return UNKNOWN, "Hostname uses punycode."
+    return LEGITIMATE, "No abnormal URL pattern detected."
+
+
+def _redirect_state(observation: WebObservation, hostname: str) -> tuple[int, str]:
+    if not observation.response:
+        return UNKNOWN, "Redirect behavior unavailable because the page could not be fetched."
+    if observation.final_hostname and _registered_domain(observation.final_hostname) != _registered_domain(hostname):
+        return PHISHING, f"Final host differs from input host: {observation.final_hostname}."
+    if observation.history_count > 2:
+        return PHISHING, f"Redirect count: {observation.history_count}."
+    if observation.history_count > 0:
+        return UNKNOWN, f"Redirect count: {observation.history_count}."
+    return LEGITIMATE, "No redirects observed."
+
+
+def _contains_text_pattern(observation: WebObservation, patterns: list[str], hit_message: str, miss_message: str) -> tuple[int, str]:
+    if not observation.text:
+        return UNKNOWN, "Page content unavailable."
+    text = observation.text.lower()
+    if any(pattern.lower() in text for pattern in patterns):
+        return PHISHING, hit_message
+    return LEGITIMATE, miss_message
+
+
+def _iframe_state(observation: WebObservation) -> tuple[int, str]:
+    if not observation.soup:
+        return UNKNOWN, "Page content unavailable."
+    iframes = observation.soup.find_all("iframe")
+    if not iframes:
+        return LEGITIMATE, "No iframe tags detected."
+    for iframe in iframes:
+        width = str(iframe.get("width", "")).strip()
+        height = str(iframe.get("height", "")).strip()
+        if iframe.get("frameborder") == "0" or width in {"0", "1"} or height in {"0", "1"}:
+            return PHISHING, "Hidden or very small iframe detected."
+    return UNKNOWN, f"{len(iframes)} iframe tag(s) detected."
+
+
+def _statistical_pattern_state(url: str, hostname: str) -> dict[str, Any]:
+    suspicious_keywords = ("login", "verify", "secure", "update", "account", "signin", "confirm", "banking")
+    digit_ratio = sum(char.isdigit() for char in hostname) / max(len(hostname), 1)
+    if digit_ratio > 0.35:
+        return {"state": PHISHING, "detail": "Hostname contains an unusually high number of digits."}
+    if any(keyword in url.lower() for keyword in suspicious_keywords) and "-" in hostname:
+        return {"state": PHISHING, "detail": "URL combines phishing-like keywords with a hyphenated hostname."}
+    return {"state": LEGITIMATE, "detail": "No strong lexical phishing pattern detected."}

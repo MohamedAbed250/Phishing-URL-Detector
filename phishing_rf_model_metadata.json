@@ -1,0 +1,99 @@
+{
+  "model_version": "2.0.0",
+  "trained_at": "2026-04-12T03:00:47.295630+00:00",
+  "feature_names": [
+    "having_ip_address",
+    "url_length",
+    "shortining_service",
+    "having_at_symbol",
+    "double_slash_redirecting",
+    "prefix_suffix",
+    "having_sub_domain",
+    "sslfinal_state",
+    "domain_registeration_length",
+    "favicon",
+    "port",
+    "https_token",
+    "request_url",
+    "url_of_anchor",
+    "links_in_tags",
+    "sfh",
+    "submitting_to_email",
+    "abnormal_url",
+    "redirect",
+    "on_mouseover",
+    "rightclick",
+    "popupwidnow",
+    "iframe",
+    "age_of_domain",
+    "dnsrecord",
+    "web_traffic",
+    "page_rank",
+    "google_index",
+    "links_pointing_to_page",
+    "statistical_report"
+  ],
+  "label_mapping": {
+    "phishing": -1,
+    "legitimate": 1
+  },
+  "metrics": {
+    "accuracy": 0.9755766621438263,
+    "precision": 0.979296066252588,
+    "recall": 0.9653061224489796,
+    "f1_score": 0.9722507708119219,
+    "confusion_matrix": [
+      [
+        946,
+        34
+      ],
+      [
+        20,
+        1211
+      ]
+    ],
+    "labels": [
+      -1,
+      1
+    ]
+  },
+  "evaluation_type": "holdout_split",
+  "dataset": {
+    "rows": 11055,
+    "columns": 31
+  },
+  "feature_importances": {
+    "having_ip_address": 0.013636888273136598,
+    "url_length": 0.009154195139325862,
+    "shortining_service": 0.005449638954528568,
+    "having_at_symbol": 0.005417650960429914,
+    "double_slash_redirecting": 0.0035352965198582227,
+    "prefix_suffix": 0.04488821533110038,
+    "having_sub_domain": 0.06437226085789756,
+    "sslfinal_state": 0.3131859048086572,
+    "domain_registeration_length": 0.016996838162072498,
+    "favicon": 0.0039221521293718534,
+    "port": 0.0026508157250737115,
+    "https_token": 0.006091558690804232,
+    "request_url": 0.020123702950394264,
+    "url_of_anchor": 0.2441595565579124,
+    "links_in_tags": 0.045623111981445294,
+    "sfh": 0.021734643344247597,
+    "submitting_to_email": 0.005723235438377257,
+    "abnormal_url": 0.004201140538579768,
+    "redirect": 0.005925582927945809,
+    "on_mouseover": 0.0032129957104894335,
+    "rightclick": 0.0013658528709175623,
+    "popupwidnow": 0.00499473538141842,
+    "iframe": 0.0024350786444826177,
+    "age_of_domain": 0.015975582310489598,
+    "dnsrecord": 0.01283600852522728,
+    "web_traffic": 0.07313634576859726,
+    "page_rank": 0.011979301444573254,
+    "google_index": 0.012743818798342852,
+    "links_pointing_to_page": 0.01941667895828128,
+    "statistical_report": 0.005111212296021441
+  },
+  "sklearn_version": "1.8.0",
+  "smote_available": false
+}
