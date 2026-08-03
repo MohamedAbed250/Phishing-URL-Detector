@@ -186,14 +186,4 @@ This will:
 - Save `model/phishing_model.pkl`
 - Save `model/phishing_model_metadata.json`
 
-## Reliability and Security
-
-The app includes:
-
-- Safe URL validation
-- Request timeouts
-- Cached repeated checks
-- Graceful degradation when WHOIS, DNS, SSL, or HTML lookups fail
-- Session cookie defaults for safer local usage
-- Startup health reporting when model artifacts are missing
 
