@@ -1,0 +1,68 @@
+{% extends "layout.html" %}
+
+{% block title %}Phishing URL Detector | About{% endblock %}
+
+{% block content %}
+<section class="page-header card glass">
+    <span class="eyebrow">About the project</span>
+    <h1>Machine learning phishing detection with explainable features.</h1>
+    <p>
+        This project was designed as a professional portfolio-ready web application that demonstrates backend engineering,
+        ML integration, UI design, and production-oriented code structure in one cohesive system.
+    </p>
+</section>
+
+<section class="about-grid">
+    <article class="card">
+        <h2>Purpose</h2>
+        <p>
+            The application helps users evaluate whether a URL is more likely to be legitimate or phishing by combining
+            a trained RandomForest model with feature extraction and interpretable output.
+        </p>
+    </article>
+
+    <article class="card">
+        <h2>Machine learning model</h2>
+        <p>
+            The detector uses a pre-trained scikit-learn <strong>RandomForestClassifier</strong>. Predictions include
+            confidence scores from <code>predict_proba</code> and a risk-level interpretation for the UI.
+        </p>
+        <ul class="signal-list compact">
+            <li>Accuracy: {{ "%.2f"|format((model_info.accuracy or 0) * 100) }}%</li>
+            <li>Precision: {{ "%.2f"|format((model_info.precision or 0) * 100) }}%</li>
+            <li>Recall: {{ "%.2f"|format((model_info.recall or 0) * 100) }}%</li>
+            <li>F1-score: {{ "%.2f"|format((model_info.f1_score or 0) * 100) }}%</li>
+        </ul>
+    </article>
+
+    <article class="card">
+        <h2>Dataset</h2>
+        <p>
+            The project uses a phishing URL dataset converted from ARFF into train and test CSV files for structured
+            model training. The backend keeps one canonical feature set so training and inference remain consistent.
+        </p>
+        <p>Rows available: <strong>{{ model_info.dataset_rows or "N/A" }}</strong></p>
+    </article>
+
+    <article class="card">
+        <h2>Feature extraction</h2>
+        <p>
+            Features include URL length, dot count, HTTPS usage, IP address usage, hyphen count, subdomain depth,
+            redirects, DNS resolution, domain age, suspicious keywords, and selected HTML or script behaviors.
+        </p>
+    </article>
+</section>
+
+<section class="card">
+    <div class="section-heading">
+        <span class="eyebrow">Technology stack</span>
+        <h2>What powers the application</h2>
+    </div>
+    <div class="tech-grid">
+        <div class="tech-card"><strong>Frontend</strong><span>HTML5, CSS3, JavaScript</span></div>
+        <div class="tech-card"><strong>Backend</strong><span>Python, Flask</span></div>
+        <div class="tech-card"><strong>Machine Learning</strong><span>scikit-learn, pandas, numpy, joblib</span></div>
+        <div class="tech-card"><strong>Security Signals</strong><span>requests, BeautifulSoup, WHOIS, DNS, SSL</span></div>
+    </div>
+</section>
+{% endblock %}

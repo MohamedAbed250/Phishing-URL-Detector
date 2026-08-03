@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Phishing URL Detector{% endblock %}</title>
+    <meta name="description" content="A modern machine learning web application that classifies URLs as legitimate or phishing.">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="site-shell">
+        <div class="bg-orb orb-one"></div>
+        <div class="bg-orb orb-two"></div>
+        <header class="topbar">
+            <a href="{{ url_for('home') }}" class="brand">
+                <span class="brand-mark">P</span>
+                <span class="brand-copy">
+                    <strong>Phishing URL Detector</strong>
+                    <small>Machine-learning security analysis</small>
+                </span>
+            </a>
+            <nav class="nav">
+                <a href="{{ url_for('home') }}" class="nav-link">Home</a>
+                <a href="{{ url_for('about') }}" class="nav-link">About</a>
+                <a href="{{ github_url }}" class="nav-link" target="_blank" rel="noreferrer">GitHub</a>
+                <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle dark mode">Toggle theme</button>
+            </nav>
+        </header>
+
+        <main class="page">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <section class="flash-stack">
+                        {% for category, message in messages %}
+                            <div class="flash flash-{{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    </section>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+
+        <footer class="footer">
+            <p>Built for software engineering portfolio use. Predictions are probabilistic and not a substitute for manual review.</p>
+            <a href="{{ github_url }}" target="_blank" rel="noreferrer">View source on GitHub</a>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

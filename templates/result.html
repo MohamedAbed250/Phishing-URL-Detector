@@ -1,0 +1,168 @@
+{% extends "layout.html" %}
+
+{% block title %}Phishing URL Detector | Result{% endblock %}
+
+{% block content %}
+<section class="result-hero">
+    <div class="card result-card result-{{ result.risk_tone }}">
+        <div class="section-heading">
+            <span class="eyebrow">Analysis result</span>
+            <h1>{{ result.label }}</h1>
+            <p>{{ result.normalized_url }}</p>
+        </div>
+        <div class="result-metrics">
+            <div class="metric">
+                <span>Confidence</span>
+                <strong>{{ result.confidence_percent }}%</strong>
+            </div>
+            <div class="metric">
+                <span>Risk level</span>
+                <strong>{{ result.risk_level }}</strong>
+            </div>
+            <div class="metric">
+                <span>Phishing probability</span>
+                <strong>{{ result.phishing_probability }}%</strong>
+            </div>
+            <div class="metric">
+                <span>Legitimate probability</span>
+                <strong>{{ result.legitimate_probability }}%</strong>
+            </div>
+        </div>
+        <div class="result-actions">
+            <a href="{{ url_for('home') }}" class="btn btn-secondary">Analyze another URL</a>
+            <button class="btn btn-primary" type="button" data-copy-result data-copy-text="{{ result.normalized_url }} | {{ result.label }} | Confidence {{ result.confidence_percent }}%">Copy result</button>
+        </div>
+    </div>
+</section>
+
+{% if result.warnings %}
+<section class="flash-stack">
+    {% for warning in result.warnings %}
+        <div class="flash flash-warning">{{ warning }}</div>
+    {% endfor %}
+</section>
+{% endif %}
+
+<section class="result-grid">
+    <div class="card">
+        <div class="section-heading">
+            <span class="eyebrow">Top explanation</span>
+            <h2>Suspicious indicators</h2>
+        </div>
+        {% if result.suspicious_indicators %}
+            <ul class="signal-list">
+                {% for indicator in result.suspicious_indicators %}
+                    <li>{{ indicator }}</li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="muted">No strong suspicious indicators were detected by the current feature set.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="section-heading">
+            <span class="eyebrow">Lexical overview</span>
+            <h2>Raw URL characteristics</h2>
+        </div>
+        <div class="mini-metrics">
+            <div><span>Length</span><strong>{{ result.lexical_overview.url_length }}</strong></div>
+            <div><span>Dots</span><strong>{{ result.lexical_overview.dot_count }}</strong></div>
+            <div><span>Subdomains</span><strong>{{ result.lexical_overview.subdomain_count }}</strong></div>
+            <div><span>Digits</span><strong>{{ result.lexical_overview.digit_count }}</strong></div>
+            <div><span>Hyphens</span><strong>{{ result.lexical_overview.hyphen_count }}</strong></div>
+            <div><span>HTTPS</span><strong>{{ "Yes" if result.lexical_overview.uses_https else "No" }}</strong></div>
+        </div>
+    </div>
+</section>
+
+<section class="result-grid">
+    <div class="card">
+        <div class="section-heading">
+            <span class="eyebrow">Model reasoning</span>
+            <h2>Most influential suspicious features</h2>
+        </div>
+        {% if result.suspicious_features %}
+            <div class="feature-stack">
+                {% for feature in result.suspicious_features %}
+                    <article class="feature-card">
+                        <div>
+                            <h3>{{ feature.label }}</h3>
+                            <p>{{ feature.observed }}</p>
+                        </div>
+                        <small>Importance {{ feature.importance }}</small>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="muted">No strongly weighted suspicious features were found.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="section-heading">
+            <span class="eyebrow">Legitimacy signals</span>
+            <h2>Most influential reassuring features</h2>
+        </div>
+        {% if result.reassuring_features %}
+            <div class="feature-stack">
+                {% for feature in result.reassuring_features %}
+                    <article class="feature-card feature-card-safe">
+                        <div>
+                            <h3>{{ feature.label }}</h3>
+                            <p>{{ feature.observed }}</p>
+                        </div>
+                        <small>Importance {{ feature.importance }}</small>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="muted">Few strong legitimacy signals were available for this URL.</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="card">
+    <div class="section-heading">
+        <span class="eyebrow">Feature breakdown</span>
+        <h2>Detected model features</h2>
+    </div>
+    <div class="table-wrap">
+        <table class="feature-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Signal</th>
+                    <th>Observed</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in result.feature_rows %}
+                    <tr>
+                        <td>{{ row.feature }}</td>
+                        <td><span class="badge badge-{{ 'danger' if row.signal == 'Suspicious' else 'warning' if row.signal == 'Uncertain' else 'safe' }}">{{ row.signal }}</span></td>
+                        <td>{{ row.observed }}</td>
+                        <td>{{ row.description }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card">
+    <div class="section-heading">
+        <span class="eyebrow">Analysis details</span>
+        <h2>Scanned metrics</h2>
+    </div>
+    <div class="metrics-grid">
+        {% for label, value in result.summary_metrics.items() %}
+            <div class="metric-tile">
+                <span>{{ label }}</span>
+                <strong>{{ value }}</strong>
+            </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

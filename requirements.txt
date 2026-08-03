@@ -1,0 +1,9 @@
+Flask==3.1.1
+beautifulsoup4==4.14.3
+imbalanced-learn==0.14.1
+joblib==1.5.2
+numpy==2.3.2
+pandas==2.3.2
+python-whois==0.9.6
+requests==2.32.5
+scikit-learn==1.8.0

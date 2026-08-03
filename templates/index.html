@@ -1,0 +1,125 @@
+{% extends "layout.html" %}
+
+{% block title %}Phishing URL Detector | Home{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div class="hero-copy card glass">
+        <span class="eyebrow">Production-style security analysis</span>
+        <h1>Detect phishing URLs with a fast, explainable machine learning workflow.</h1>
+        <p>
+            Submit any URL and get a prediction, confidence score, risk level, and human-readable feature explanation.
+            The detector combines lexical URL signals, DNS and SSL checks, and model-driven classification.
+        </p>
+        <div class="hero-actions">
+            <a href="#analyzer" class="btn btn-primary">Analyze a URL</a>
+            <a href="{{ url_for('about') }}" class="btn btn-secondary">Learn how it works</a>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span>Accuracy</span>
+                <strong>{{ "%.2f"|format((model_info.accuracy or 0) * 100) }}%</strong>
+            </div>
+            <div class="stat-card">
+                <span>Features</span>
+                <strong>{{ model_info.feature_count or 30 }}</strong>
+            </div>
+            <div class="stat-card">
+                <span>Dataset Rows</span>
+                <strong>{{ model_info.dataset_rows or "N/A" }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <aside class="hero-panel card">
+        <h2>Why phishing detection matters</h2>
+        <ul class="signal-list">
+            <li>Phishing pages mimic trusted brands and steal credentials.</li>
+            <li>Malicious URLs often hide in shortened links or fake login pages.</li>
+            <li>Automated detection helps triage risk before a user clicks.</li>
+        </ul>
+        <div class="disclaimer-banner">
+            <strong>Disclaimer:</strong>
+            <span>Predictions are probabilistic, not guarantees. Always verify suspicious links manually.</span>
+        </div>
+    </aside>
+</section>
+
+<section id="analyzer" class="analyzer-grid">
+    <div class="card analyzer-card">
+        <div class="section-heading">
+            <span class="eyebrow">URL scanner</span>
+            <h2>Analyze one URL</h2>
+            <p>We will auto-add <code>https://</code> when a scheme is missing.</p>
+        </div>
+
+        <form action="{{ url_for('analyze') }}" method="post" class="analyze-form" data-analyze-form>
+            <label for="url" class="field-label">Target URL</label>
+            <div class="field-shell">
+                <input
+                    id="url"
+                    name="url"
+                    type="text"
+                    class="url-input"
+                    placeholder="example.com/login or https://example.com"
+                    value="{{ submitted_url or '' }}"
+                    required
+                    autocomplete="off"
+                >
+                <button type="submit" class="btn btn-primary submit-btn" data-submit-button>
+                    <span class="btn-label">Analyze URL</span>
+                    <span class="btn-spinner"></span>
+                </button>
+            </div>
+            <p class="field-help">Examples: banking portals, shortened links, fake sign-in pages, or suspicious domain redirects.</p>
+        </form>
+
+        <div class="example-strip">
+            <span>Try an example:</span>
+            {% for url in examples %}
+                <button class="example-chip" type="button" data-example-url="{{ url }}">{{ url }}</button>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card history-card">
+        <div class="section-heading">
+            <span class="eyebrow">Recent activity</span>
+            <h2>Prediction history</h2>
+        </div>
+        {% if history %}
+            <div class="history-list">
+                {% for item in history %}
+                    <article class="history-item">
+                        <div>
+                            <strong>{{ item.verdict }}</strong>
+                            <p>{{ item.url }}</p>
+                        </div>
+                        <div class="history-meta">
+                            <span class="badge badge-{{ 'danger' if item.verdict == 'Phishing' else 'safe' }}">{{ item.risk_level }}</span>
+                            <small>{{ item.confidence }}%</small>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="muted">No scans yet. Your recent results will appear here during this session.</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="feature-promo">
+    <article class="card promo-card">
+        <h3>Explainable predictions</h3>
+        <p>Every scan includes the exact features and suspicious indicators that influenced the decision.</p>
+    </article>
+    <article class="card promo-card">
+        <h3>Production-minded architecture</h3>
+        <p>The app is modular, validated, and organized for long-term maintainability and portfolio presentation.</p>
+    </article>
+    <article class="card promo-card">
+        <h3>Safe fallbacks</h3>
+        <p>DNS, WHOIS, SSL, or HTML parsing failures degrade gracefully instead of crashing the entire experience.</p>
+    </article>
+</section>
+{% endblock %}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Phishing URL Detector favicon">
+  <defs>
+    <linearGradient id="shield" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#59c3ff"/>
+      <stop offset="100%" stop-color="#5ef0a5"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#08111f"/>
+  <path d="M32 10L48 16V29c0 11.5-7.2 20.2-16 24-8.8-3.8-16-12.5-16-24V16l16-6z" fill="url(#shield)"/>
+  <path d="M24 30h16" stroke="#08111f" stroke-width="4" stroke-linecap="round"/>
+  <path d="M32 22v16" stroke="#08111f" stroke-width="4" stroke-linecap="round"/>
+</svg>
