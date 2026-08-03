@@ -1,37 +1,32 @@
 # Phishing URL Detector
 
-A complete, modern, and portfolio-ready phishing URL detection web application built with **Flask**, **scikit-learn**, and a production-style frontend.
+A modern, portfolio-ready Flask web application that predicts whether a URL is legitimate or phishing and explains the result with readable security signals.
 
-The application predicts whether a submitted URL is **legitimate** or **phishing**, then explains the result with feature-level insight such as URL structure, redirects, HTTPS usage, DNS status, domain age, and suspicious lexical patterns.
+## Overview
 
-## Project Overview
+This project combines a trained Random Forest classifier with a clean web interface for URL analysis. Users can submit a URL and receive:
 
-This project demonstrates:
+- A phishing or legitimate verdict
+- Confidence from `predict_proba`
+- Low, Medium, or High risk classification
+- Suspicious and reassuring feature explanations
+- A detailed feature breakdown table
 
-- Full-stack Python web development with Flask
-- Machine learning inference in a web application
-- Modular feature extraction and prediction layers
-- Responsive frontend design with HTML, CSS, and JavaScript
-- Clean repository structure suitable for a GitHub portfolio
-
-The goal is not only to classify URLs, but to present the result in a clear, professional, and interpretable way.
+The app is structured to be easy to demo, maintain, and extend.
 
 ## Features
 
-- Modern responsive home page with hero section and navigation
-- URL validation with automatic `https://` normalization
-- ML-powered phishing prediction using a trained RandomForest model
-- Confidence scores from `predict_proba`
-- Risk-level classification: Low, Medium, High
-- Feature explanation with readable descriptions
-- Suspicious indicator summary
-- Prediction history stored during the session
+- Responsive landing page with a professional hero section
+- Automatic `https://` normalization when the scheme is missing
+- URL validation before inference
+- Model-backed phishing classification
+- Confidence scoring and risk-level labeling
+- Explainable output based on extracted features
+- Session-based prediction history
 - Dark mode toggle
-- Loading state on analysis
-- Copy result button
-- Example URLs for fast testing
-- About page explaining model, dataset, and architecture
-- Favicon and polished UI for portfolio presentation
+- Loading state and copy-result action
+- About page with model and dataset details
+- Health endpoint for quick local or deployment checks
 
 ## Tech Stack
 
@@ -60,7 +55,7 @@ The goal is not only to classify URLs, but to present the result in a clear, pro
 - python-whois
 - imbalanced-learn
 
-## Folder Structure
+## Project Structure
 
 ```text
 phishing-url-detector/
@@ -68,16 +63,13 @@ phishing-url-detector/
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
-│
 ├── model/
 │   ├── phishing_model.pkl
 │   ├── phishing_model_metadata.json
 │   └── train_model.py
-│
 ├── utils/
 │   ├── feature_extraction.py
 │   └── predictor.py
-│
 ├── static/
 │   ├── css/
 │   │   └── style.css
@@ -85,13 +77,11 @@ phishing-url-detector/
 │   │   └── script.js
 │   └── images/
 │       └── favicon.svg
-│
 ├── templates/
 │   ├── index.html
 │   ├── result.html
 │   ├── about.html
 │   └── layout.html
-│
 └── data/
     ├── train.csv
     ├── test.csv
@@ -100,60 +90,48 @@ phishing-url-detector/
 
 ## How It Works
 
-### 1. User submits a URL
+1. The user submits a URL.
+2. The backend normalizes and validates it.
+3. `utils/feature_extraction.py` builds the canonical phishing feature set.
+4. `utils/predictor.py` loads the saved model and runs inference.
+5. The UI renders the verdict, confidence, risk level, and explanation cards.
 
-The homepage accepts a user-entered URL and validates that it is structurally usable.
+## Core Feature Signals
 
-### 2. Features are extracted
-
-The backend extracts a combination of lexical and network-aware features, including:
+The model and explanation layer use signals such as:
 
 - URL length
-- Number of dots
-- Number of subdomains
-- HTTPS usage
+- Subdomain depth
+- HTTPS and SSL state
 - IP address usage
-- Hyphen count
-- Suspicious keywords
-- Digit count
+- Hyphenated domains
 - Redirect behavior
 - DNS resolution
-- Domain age
-- HTML and script signals
-
-### 3. Model inference runs
-
-The extracted feature vector is passed into a pre-trained `RandomForestClassifier`.
-
-### 4. The app returns
-
-- Prediction label
-- Confidence score
-- Risk level
-- Feature breakdown
-- Suspicious and reassuring signals
+- Domain age and registration length
+- HTML link and form behavior
+- Suspicious lexical patterns
 
 ## Machine Learning Notes
 
-- Model type: `RandomForestClassifier`
+- Model: `RandomForestClassifier`
 - Labels:
   - `-1` = Phishing
   - `1` = Legitimate
-- Confidence is based on `predict_proba`
-- Training and inference share one canonical feature list
-- SMOTE is applied only after the train/test split during retraining
-- External checks degrade gracefully if DNS, WHOIS, SSL, or HTML fetches fail
+- Confidence is taken from `predict_proba`
+- Training and inference use one canonical feature list
+- SMOTE is applied only to the training split during retraining
+- External checks fail gracefully instead of crashing the app
 
 ## Installation
 
-### 1. Clone the project
+### 1. Clone the repository
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/MohamedAbed250/Phishing-URL-Detector.git
 cd phishing-url-detector
 ```
 
-### 2. Create a virtual environment
+### 2. Create and activate a virtual environment
 
 Windows PowerShell:
 
@@ -175,9 +153,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Usage
-
-### Run the Flask app
+## Running the App
 
 ```powershell
 python app.py
@@ -186,12 +162,9 @@ python app.py
 Then open:
 
 - `http://127.0.0.1:5000`
+- `http://127.0.0.1:5000/health`
 
-### Try a URL
-
-Use the home page URL input and click **Analyze URL**.
-
-Example values:
+## Example URLs
 
 - `https://github.com`
 - `https://www.openai.com`
@@ -199,7 +172,7 @@ Example values:
 
 ## Retraining the Model
 
-If you want to retrain the model using the CSV files:
+To retrain the phishing model:
 
 ```powershell
 python -m model.train_model
@@ -208,43 +181,40 @@ python -m model.train_model
 This will:
 
 - Load `data/train.csv` and `data/test.csv`
-- Apply SMOTE when available
-- Tune a RandomForest model
+- Apply SMOTE to the training data when available
+- Tune a Random Forest model
 - Save `model/phishing_model.pkl`
 - Save `model/phishing_model_metadata.json`
 
-## Security and Robustness
+## Reliability and Security
 
-The application includes:
+The app includes:
 
-- URL validation before prediction
-- Friendly error messages
-- Safe handling for invalid URLs
+- Safe URL validation
 - Request timeouts
-- Cached repeated URL checks
-- Graceful fallback if WHOIS, DNS, SSL, or HTML checks fail
-- Separation of UI, model logic, and feature extraction
+- Cached repeated checks
+- Graceful degradation when WHOIS, DNS, SSL, or HTML lookups fail
+- Session cookie defaults for safer local usage
+- Startup health reporting when model artifacts are missing
 
-## Portfolio Value
+## Recent Cleanup
 
-This project is suitable for a software engineering or ML internship portfolio because it demonstrates:
+This repository was cleaned up to improve maintainability and GitHub presentation:
 
-- Backend architecture
-- Web application development
-- ML deployment
-- Maintainable Python code
-- UI polish and usability
-- Documentation quality
+- Refactored app startup and request handling
+- Added a `/health` route
+- Removed hardcoded debug-on behavior
+- Improved `.gitignore` coverage for local environment noise
+- Fixed the README structure rendering and run instructions
 
 ## Future Improvements
 
-- Export scan reports as PDF or CSV
-- Add asynchronous batch analysis
+- Add batch CSV analysis
+- Add automated tests
 - Add Docker support
-- Add unit and integration tests
-- Add API endpoints for external clients
-- Add user accounts and persistent scan history
+- Expose a JSON API
+- Persist scan history in a database
 
 ## License
 
-This project is provided for educational and portfolio use. You can add your preferred open-source license such as MIT.
+This project is provided for educational and portfolio use. You can add an MIT or similar open-source license if you want to publish it formally.

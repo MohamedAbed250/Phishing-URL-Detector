@@ -3,6 +3,14 @@
 {% block title %}Phishing URL Detector | Home{% endblock %}
 
 {% block content %}
+{% if not service_ready and startup_error %}
+<section class="flash-stack">
+    <div class="flash flash-error">
+        The detector is temporarily unavailable because the model could not be loaded. {{ startup_error }}
+    </div>
+</section>
+{% endif %}
+
 <section class="hero">
     <div class="hero-copy card glass">
         <span class="eyebrow">Production-style security analysis</span>
