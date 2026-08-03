@@ -1,4 +1,4 @@
-# PhishGuard URL Detector
+# Phishing URL Detector
 
 PhishGuard URL Detector is a Streamlit-based phishing URL analysis app built on top of a RandomForest classifier. It classifies a user-entered URL as either:
 
