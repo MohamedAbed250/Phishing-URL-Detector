@@ -100,16 +100,16 @@ phishing-url-detector/
 
 The model and explanation layer use signals such as:
 
-- URL length
-- Subdomain depth
-- HTTPS and SSL state
+- URL length: Measures the total length of the URL
+- Subdomain depth: Counts the number of subdomains; excessive subdomains may indicate phishing attempts.
+- HTTPS and SSL state: Verifies whether the website uses HTTPS and has a valid SSL certificate
 - IP address usage
-- Hyphenated domains
-- Redirect behavior
-- DNS resolution
+- Hyphenated domains: Identifies domains containing multiple hyphens
+- Redirect behaviour: Checks for excessive or suspicious URL redirects
+- DNS resolution: Verifies that the domain resolves correctly through the Domain Name System (DNS)
 - Domain age and registration length
-- HTML link and form behavior
-- Suspicious lexical patterns
+- HTML link and form behaviour
+- Suspicious lexical patterns: Checks for unusual characters or keywords
 
 ## Machine Learning Notes
 
